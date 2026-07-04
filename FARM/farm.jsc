@@ -1,0 +1,172 @@
+const fs = require('fs');
+const path = require('path');
+const startCaptchaDetector = require('../untils/captcha');
+const startStatsCommand = require('../untils/webhock');
+const startRPC = require('../untils/rpc');
+
+const randomChoice = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const randomDelay = (min, max) => Math.floor(Math.random() * (max - min) + min);
+const delay = (ms) => new Promise((res) => setTimeout(res, ms));
+
+const USER_ID = "1299386568712392765";
+const stats = { hunt: 0, battle: 0 };
+
+const global = {
+  paused: false,
+  captcha: false,
+  gemChecking: false,
+  hunt: false,
+  battle: false,
+};
+
+function startAutoPause() {
+  const runTime  = randomDelay(15 * 60 * 1000, 30 * 60 * 1000);
+  const pauseTime = randomDelay(5 * 60 * 1000,  7 * 60 * 1000);
+
+  console.log(`⏱️ Pause sau ${(runTime / 60000).toFixed(1)} phút`);
+
+  setTimeout(() => {
+    global.paused = true;
+    console.log(`⏸️ Auto pause — nghỉ ${(pauseTime / 60000).toFixed(1)} phút`);
+
+    setTimeout(() => {
+      if (!global.captcha && !global.gemChecking) {
+        global.paused = false;
+        console.log("▶️ Auto resume — farm tiếp");
+      } else {
+        console.log("⚠️ Resume bị hold — captcha/gem active");
+      }
+      startAutoPause();
+    }, pauseTime);
+  }, runTime);
+}
+
+function isBlocked() {
+  return global.paused || global.captcha || global.gemChecking;
+}
+
+async function hunt(client, channel) {
+  const interval = randomDelay(15000, 25000);
+
+  if (isBlocked() || global.battle) {
+    console.log("⏭️ Hunt skip — blocked/battle active");
+    setTimeout(() => hunt(client, channel), interval);
+    return;
+  }
+
+  global.hunt = true;
+  try {
+    channel.sendTyping();
+    if (global.battle) await delay(1500);
+
+    if (isBlocked()) {
+      console.log("⏭️ Hunt abort — paused trong delay");
+      return;
+    }
+
+    await channel.send(
+      `${randomChoice(["owo", "owo"])} ${randomChoice(["h", "hunt"])}`
+    );
+    stats.hunt++;
+    console.log(`🏹 Hunt #${stats.hunt}`);
+
+    sendPhrase(channel);
+  } catch (err) {
+    console.log("❌ Hunt lỗi:", err.message);
+  } finally {
+    global.hunt = false;
+    console.log(`⏱️ Hunt tiếp theo sau ${(interval / 1000).toFixed(1)}s`);
+    setTimeout(() => hunt(client, channel), interval);
+  }
+}
+
+async function battle(client, channel) {
+  const interval = randomDelay(15000, 25000);
+
+  if (isBlocked() || global.hunt) {
+    console.log("⏭️ Battle skip — blocked/hunt active");
+    setTimeout(() => battle(client, channel), interval);
+    return;
+  }
+
+  global.battle = true;
+  try {
+    channel.sendTyping();
+    if (global.hunt) await delay(1500);
+
+    if (isBlocked()) {
+      console.log("⏭️ Battle abort — paused trong delay");
+      return;
+    }
+
+    await channel.send(
+      `${randomChoice(["owo", "owo"])} ${randomChoice(["b", "battle"])}`
+    );
+    stats.battle++;
+    console.log(`⚔️ Battle #${stats.battle}`);
+  } catch (err) {
+    console.log("❌ Battle lỗi:", err.message);
+  } finally {
+    global.battle = false;
+    console.log(`⏱️ Battle tiếp theo sau ${(interval / 1000).toFixed(1)}s`);
+    setTimeout(() => battle(client, channel), interval);
+  }
+}
+
+async function sendPhrase(channel) {
+  if (global.paused || global.captcha) {
+    console.log("⏭️ Phrase skip — paused/captcha");
+    return;
+  }
+
+  try {
+    const data = fs.readFileSync(
+      path.join(__dirname, '../textmess/text.json'), 'utf8'
+    );
+    const { phrases } = JSON.parse(data);
+
+    if (!phrases?.length) {
+      console.log("❌ Phrases trống");
+      return;
+    }
+
+    const phrase = randomChoice(phrases);
+    channel.sendTyping();
+    await delay(randomDelay(800, 1500));
+
+    if (global.paused || global.captcha) {
+      console.log("⏭️ Phrase skip — flag đổi trong delay");
+      return;
+    }
+
+    await channel.send(phrase);
+    console.log(`💬 Phrase: "${phrase}"`);
+  } catch (err) {
+    console.log("❌ Phrase lỗi:", err.message);
+  }
+}
+
+module.exports = async function farm(client, channelId) {
+  const channel = client.channels.cache.get(channelId);
+
+  if (!channel) {
+    console.log("❌ Không tìm thấy kênh — kiểm tra CHANNEL_ID");
+    return;
+  }
+
+  console.log(`✅ Farm bắt đầu: ${channel.name}`);
+
+  global.restartLoops = () => {
+    hunt(client, channel);
+    setTimeout(() => battle(client, channel), 2000);
+  };
+
+  startCaptchaDetector(client, channelId, USER_ID, global);
+  startAutoPause();
+  startStatsCommand(client, stats);
+  startRPC(client);
+
+  hunt(client, channel);
+  await delay(2000);
+  battle(client, channel);
+};
