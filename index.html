@@ -3,106 +3,91 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trang Web Đơn Giản Chuẩn Hiện Đại</title>
+    <title>Quản Lý Khởi Động Bot Discord</title>
     <style>
-        /* CSS Cơ bản giúp trang web dễ nhìn hơn */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background-color: #f4f4f9;
-        }
-        header {
-            background-color: #2c3e50;
-            color: #fff;
-            padding: 20px;
-            text-align: center;
-        }
-        nav {
-            background-color: #34495e;
-            text-align: center;
-            padding: 10px;
-        }
-        nav a {
-            color: #fff;
-            text-decoration: none;
-            margin: 0 15px;
-            font-weight: bold;
-        }
-        nav a:hover {
-            color: #1abc9c;
-        }
-        .container {
-            max-width: 800px;
-            margin: 30px auto;
-            padding: 20px;
-            background: #fff;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        h2 {
-            color: #2c3e50;
-            margin-bottom: 15px;
-            border-bottom: 2px solid #1abc9c;
-            padding-bottom: 5px;
-        }
-        p {
-            margin-bottom: 15px;
-        }
-        .btn {
-            display: inline-block;
-            background-color: #1abc9c;
-            color: white;
-            padding: 10px 20px;
-            text-decoration: none;
-            border-radius: 5px;
-            font-weight: bold;
-            transition: background 0.3s;
-        }
-        .btn:hover {
-            background-color: #16a085;
-        }
-        footer {
-            text-align: center;
-            padding: 20px;
-            background-color: #2c3e50;
-            color: white;
-            margin-top: 40px;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+        body { background-color: #1e1e24; color: #fff; padding: 30px; }
+        h1 { margin-bottom: 20px; color: #5865F2; text-align: center; font-size: 28px; }
+        .container { max-width: 900px; margin: 0 auto; background: #2a2b36; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #3e3f4b; }
+        th { background-color: #343644; color: #b9bbbe; }
+        tr:hover { background-color: #323442; }
+        .btn { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 5px; color: white; }
+        .btn-start { background-color: #2ecc71; }
+        .btn-start:hover { background-color: #27ae60; }
+        .btn-stop { background-color: #e74c3c; }
+        .btn-stop:hover { background-color: #c0392b; }
+        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: bold; background: #4f545c; }
     </style>
 </head>
 <body>
 
-    <header>
-        <h1>Chào Mừng Đến Với Website Của Tôi</h1>
-        <p>Nơi chia sẻ kiến thức và trải nghiệm</p>
-    </header>
+<div class="container">
+    <h1>🤖 Bảng Điều Khiển Token Bot</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Tên Profile</th>
+                <th>Tài khoản (Tag)</th>
+                <th>Trạng thái</th>
+                <th>Hành động</th>
+            </tr>
+        </thead>
+        <tbody id="bot-list">
+            <tr>
+                <td colspan="4" style="text-align: center; color: #aaa;">Đang tải danh sách profile...</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
 
-    <nav>
-        <a href="#">Trang Chủ</a>
-        <a href="#">Giới Thiệu</a>
-        <a href="#">Dịch Vụ</a>
-        <a href="#">Liên Hệ</a>
-    </nav>
+<script>
+    // Hàm lấy data từ API Backend và render ra HTML
+    async function loadBotStatus() {
+        try {
+            const res = await fetch('/api/status');
+            const data = await res.json();
+            const tbody = document.getElementById('bot-list');
+            
+            if (Object.keys(data).length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: #aaa;">Không tìm thấy profile nào trong thư mục /profiles</td></tr>`;
+                return;
+            }
 
-    <div class="container">
-        <h2>Giới thiệu bản thân</h2>
-        <p>Đây là khu vực để bạn viết nội dung giới thiệu về bản thân hoặc dự án của bạn. Đoạn code HTML này đã được tối ưu hóa cấu trúc chuẩn SEO, giúp các công cụ tìm kiếm dễ dàng đọc hiểu.</p>
-        
-        <h2>Mục tiêu của tôi</h2>
-        <p>Bạn có thể tùy ý thay đổi văn bản, thêm hình ảnh hoặc các liên kết khác vào đây để hoàn thiện trang web theo ý muốn của mình.</p>
-        
-        <a href="#" class="btn">Tìm hiểu thêm</a>
-    </div>
+            tbody.innerHTML = '';
+            for (const [profileName, info] of Object.entries(data)) {
+                tbody.innerHTML += `
+                    <tr>
+                        <td><strong>${profileName}</strong></td>
+                        <td>${info.user}</td>
+                        <td><span class="status-badge">${info.status}</span></td>
+                        <td>
+                            <button class="btn btn-start" onclick="controlBot('start', '${profileName}')">Mở</button>
+                            <button class="btn btn-stop" onclick="controlBot('stop', '${profileName}')">Tắt</button>
+                        </td>
+                    </tr>
+                `;
+            }
+        } catch (e) {
+            console.error("Lỗi cập nhật giao diện:", e);
+        }
+    }
 
-    <footer>
-        <p>&copy; 2026 Tên Của Bạn. Tất cả các quyền được bảo lưu.</p>
-    </footer>
+    // Hàm gửi lệnh Bật/Tắt về Backend khi bấm nút
+    async function controlBot(action, profile) {
+        await fetch('/api/control', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action, profile })
+        });
+        loadBotStatus(); // Tải lại bảng sau khi bấm
+    }
+
+    // Tự động cập nhật trạng thái mỗi 3 giây một lần
+    setInterval(loadBotStatus, 3000);
+    loadBotStatus();
+</script>
 
 </body>
 </html>
