@@ -2,13 +2,16 @@ require('dotenv').config();
 const { Client } = require('discord.js-selfbot-v13');
 const farm = require('./FARM/farm');
 const Keep_alive = require('./web/Keep_alive');
-const sever = require('./web/browse/sever');
 const chokidar = require('chokidar');
-const dotenv = require('dotenv');
 const path = require('path');
 const fs = require('fs');
-const pause  = require('./Commands/pause');
+const pause = require('./Commands/pause');
 const resume = require('./Commands/resume');
+
+// Thêm Express để làm giao diện Web
+const express = require('express');
+const app = express();
+const PORT = 3000;
 
 Keep_alive();
 
@@ -22,6 +25,7 @@ const c = {
 };
 
 const activeClients = new Map();
+const profilesStatus = new Map(); // Lưu trạng thái hiển thị lên Web
 
 function parseEnv(envPath) {
   if (!fs.existsSync(envPath)) return {};
@@ -39,62 +43,52 @@ function parseEnv(envPath) {
   return result;
 }
 
-function startClient(profileName, envPath) {
-  if (activeClients.has(profileName)) {
-    console.log(c.yellow(`[${profileName}] Already running, skipping.`));
-    return;
+async function setupClientLogic(client, channelId, profileName = 'Root') {
+  const state = {};
+  const idUser = client.user.id;
+  let channel;
+  try {
+    channel = client.channels.cache.get(channelId) || await client.channels.fetch(channelId);
+  } catch (err) {
+    console.log(c.red(`[${profileName}] ❌ Kênh lỗi: ${err.message}`));
   }
+  client.on('messageCreate', msg => pause(client, msg, state, idUser));
+  client.on('messageCreate', msg => resume(client, msg, state, idUser, channel));
+  farm(client, channelId, state);
+}
 
-  // Đọc hết data NGAY LÚC NÀY — trước khi file có thể bị xóa/move
+function startClient(profileName, envPath) {
+  if (activeClients.has(profileName)) return;
+
   const env = parseEnv(envPath);
   const token     = env.TOKEN || env.DISCORD_TOKEN || null;
   const channelId = env.CHANNEL || env.CHANNEL_ID || null;
 
-  if (!token) {
-    console.log(c.red(`[${profileName}] No TOKEN in ${envPath} — skipping.`));
-    return;
-  }
-  if (!channelId) {
-    console.log(c.red(`[${profileName}] No CHANNEL in ${envPath} — skipping.`));
+  if (!token || !channelId) {
+    profilesStatus.set(profileName, { status: 'Lỗi cấu hình', user: 'Không rõ' });
     return;
   }
 
-  console.log(c.blue(`\n📁 Profile: ${profileName} | Channel: ${channelId}`));
-  console.log(c.green(`✅ Starting client for: ${profileName}`));
+  profilesStatus.set(profileName, { status: 'Đang kết nối...', user: '...' });
 
-  const client = new Client({
-    checkUpdate: false,
-    readyStatus: false,
-    selfbot: true,
-  });
+  const client = new Client({ checkUpdate: false, readyStatus: false, selfbot: true });
 
-  client.once('ready', () => {
+  client.once('ready', async () => {
     console.log(c.green(`[${profileName}] ✅ Logged in as ${client.user.tag}`));
     activeClients.set(profileName, client);
-
-    const state   = {};
-    const idUser  = client.user.id;
-    const channel = client.channels.cache.get(channelId);
-
-    client.on('messageCreate', msg => pause(client, msg, state, idUser));
-    client.on('messageCreate', msg => resume(client, msg, state, idUser, channel));
-
-    farm(client, channelId, state); // ← string ID, không phải path
+    profilesStatus.set(profileName, { status: 'Đang chạy 🟢', user: client.user.tag, path: envPath });
+    await setupClientLogic(client, channelId, profileName);
   });
 
   client.on('invalidated', () => {
-    console.log(c.red(`[${profileName}] ⚠ Session invalidated — respawning in 5s...`));
     activeClients.delete(profileName);
+    profilesStatus.set(profileName, { status: 'Mất kết nối 🔴', user: '...' });
     client.destroy();
     setTimeout(() => startClient(profileName, envPath), 5000);
   });
 
-  client.on('error', err => {
-    console.log(c.red(`[${profileName}] Error: ${err.message}`));
-  });
-
   client.login(token).catch(err => {
-    console.log(c.red(`[${profileName}] Login failed: ${err.message}`));
+    profilesStatus.set(profileName, { status: 'Đăng nhập thất bại ❌', user: '...' });
     activeClients.delete(profileName);
   });
 }
@@ -102,98 +96,50 @@ function startClient(profileName, envPath) {
 function stopClient(profileName) {
   const client = activeClients.get(profileName);
   if (!client) return;
-  console.log(c.yellow(`[${profileName}] Profile removed — destroying client.`));
   client.destroy();
   activeClients.delete(profileName);
+  profilesStatus.set(profileName, { status: 'Đã dừng 🛑', user: '...' });
 }
 
 function watchProfiles() {
   const profilesDir = path.resolve('./profiles');
   if (!fs.existsSync(profilesDir)) fs.mkdirSync(profilesDir, { recursive: true });
 
-  console.log(c.magenta(`👁  Watching: ${profilesDir}`));
-
-  const watcher = chokidar.watch(profilesDir, {
-    persistent: true,
-    ignoreInitial: false,
-    depth: 2,
-    awaitWriteFinish: {
-      stabilityThreshold: 800,
-      pollInterval: 100,
-    },
-  });
-
-  watcher
-    .on('add', filePath => {
-      if (path.basename(filePath) !== '.env') return;
-      const profileName = path.basename(path.dirname(filePath));
-      if (profileName === path.basename(profilesDir)) return;
-      console.log(c.cyan(`👁  [watcher] Detected .env → ${filePath}`));
-      startClient(profileName, filePath);
-    })
-    .on('change', filePath => {
-      if (path.basename(filePath) !== '.env') return;
-      const profileName = path.basename(path.dirname(filePath));
-      if (profileName === path.basename(profilesDir)) return;
-      console.log(c.cyan(`🔄 [watcher] .env changed → restarting ${profileName}`));
-      stopClient(profileName);
-      setTimeout(() => startClient(profileName, filePath), 2000);
-    })
-    .on('unlink', filePath => {
-      if (path.basename(filePath) !== '.env') return;
-      const profileName = path.basename(path.dirname(filePath));
-      stopClient(profileName);
-    });
-}
-
-function startRootClient() {
-  const token     = process.env.HTOKEN;
-  const channelId = process.env.CHANNEL || process.env.CHANNEL_ID;
-
-  if (!token) {
-    console.log(c.red('❌ No TOKEN in .env — nothing to start.'));
-    return;
-  }
-  if (!channelId) {
-    console.log(c.red('❌ No CHANNEL in .env — nothing to start.'));
-    return;
-  }
-
-  console.log(c.yellow('⚡ Starting root client...'));
-
-  const client = new Client({
-    checkUpdate: false,
-    readyStatus: false,
-    selfbot: true,
-  });
-
-  client.once('ready', () => {
-    console.log(c.green(`✅ Root ready: ${client.user.tag}`));
-
-    const state   = {};
-    const idUser  = client.user.id;
-    const channel = client.channels.cache.get(channelId);
-
-    client.on('messageCreate', msg => pause(client, msg, state, idUser));
-    client.on('messageCreate', msg => resume(client, msg, state, idUser, channel));
-
-    farm(client, channelId, state);
-  });
-
-  client.on('invalidated', () => {
-    console.log(c.red('Root invalidated — reconnecting in 5s...'));
-    setTimeout(() => client.login(token), 5000);
-  });
-
-  client.on('error', err => {
-    console.log(c.red(`Root error: ${err.message}`));
-  });
-
-  client.login(token).catch(err => {
-    console.log(c.red(`Root login failed: ${err.message}`));
+  chokidar.watch(profilesDir, { persistent: true, depth: 2 }).on('add', filePath => {
+    if (path.basename(filePath) !== '.env') return;
+    const profileName = path.basename(path.dirname(filePath));
+    startClient(profileName, filePath);
   });
 }
 
-// ─── Boot ─────────────────────────────────────────────────────────────────────
-startRootClient();
+// ─── PHẦN ĐIỀU KHIỂN WEB (HTML/API) ──────────────────────────────────────────
+app.use(express.json());
+
+// Gửi file HTML về trình duyệt
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// API lấy danh sách bot hiện tại
+app.get('/api/status', (req, res) => {
+  res.json(Object.fromEntries(profilesStatus));
+});
+
+// API Nút bấm: Điều khiển Tắt/Mở bot từ Web
+app.post('/api/control', (req, res) => {
+  const { action, profile } = req.body;
+  const data = profilesStatus.get(profile);
+
+  if (action === 'stop') {
+    stopClient(profile);
+  } else if (action === 'start' && data?.path) {
+    startClient(profile, data.path);
+  }
+  res.json({ success: true });
+});
+
+app.listen(PORT, () => {
+  console.log(c.cyan(`🌐 Giao diện quản lý: http://localhost:${PORT}`));
+});
+
 watchProfiles();
